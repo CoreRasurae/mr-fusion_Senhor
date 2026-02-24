@@ -27,6 +27,8 @@ mount -r /dev/mmcblk0p1 /mnt/release
 
 ## Show splash screen
 fbv -fr /mnt/release/splash.png &
+FBV_PID=$!
+
 cd /tmp/release
 7zr x /mnt/release/release.7z
 
@@ -61,27 +63,67 @@ echo "ethaddr=${MAC}" > /tmp/release/files/linux/u-boot.txt
 mkdir -p /tmp/release/files/linux/gamecontrollerdb
 cp -r /mnt/release/gamecontrollerdb.txt /tmp/release/files/linux/gamecontrollerdb/
 
+# Load the configs before unmount
+. /mnt/release/build_configs.sh
+
+# Keep failure_fs.png at hand
+cp /mnt/release/failure_fs.png /tmp/release/.
+
 umount /mnt/release
 
-# Re-partition the SD card:
-# 1. Create an ExFAT partition spanning almost the entire SD card.
-# 2. Create a small 0xA2 type partition at the end to store the bootloader.
-DATA_PARTITION_SIZE=$(($( cat /sys/block/mmcblk0/size ) - 8192))
-sfdisk --force /dev/mmcblk0 << EOF
-; ${DATA_PARTITION_SIZE}; 07
-; ; a2
+if [ "$FUSION_FS_CONFIG" == "ext4" ]; then
+  # Re-partition the SD card:
+  # 1. Create an ExFAT partition spanning almost the entire SD card.
+  # 2. Create a small 0xA2 type partition at the end to store the bootloader.
+  DATA_PARTITION_SIZE=$(($( cat /sys/block/mmcblk0/size ) - 8192))
+  sfdisk --force /dev/mmcblk0 << EOF
+  ; ${DATA_PARTITION_SIZE}; 83
+  ; ; a2
 EOF
 
-# Create the MiSTer_Data partition.
-mkfs.exfat -n "MiSTer_Data" /dev/mmcblk0p1
+  # Create the MiSTer_Data partition.
+  mkfs.ext4 -t ext4 -L "MiSTer_Data" -E root_owner=1000:1000 /dev/mmcblk0p1
 
-# Mount the MiSTer_Data partition.
-mkdir -p /mnt/data
-mount.exfat-fuse /dev/mmcblk0p1 /mnt/data
+  # Mount the MiSTer_Data partition.
+  mkdir -p /mnt/data
+  mount -t ext4 /dev/mmcblk0p1 /mnt/data
 
-# Copy the MiSTer release files to the MiSTer_Data partition.
-cp -r /tmp/release/files/* /mnt/data/
-umount /mnt/data
+  # Copy the MiSTer release files to the MiSTer_Data partition.
+  cp -r /tmp/release/files/* /mnt/data/
+  chown -R 1000:1000 /mnt/data
+  chmod +x /mnt/data/MiSTer
+  chmod +x /mnt/data/Scripts/*
+  umount /mnt/data
+elif [ "$FUSION_FS_CONFIG" == "exfat" ]; then
+  # Re-partition the SD card:
+  # 1. Create an ExFAT partition spanning almost the entire SD card.
+  # 2. Create a small 0xA2 type partition at the end to store the bootloader.
+  DATA_PARTITION_SIZE=$(($( cat /sys/block/mmcblk0/size ) - 8192))
+  sfdisk --force /dev/mmcblk0 << EOF
+  ; ${DATA_PARTITION_SIZE}; b
+  ; ; a2
+EOF
+
+  # Create the MiSTer_Data partition.
+  mkfs.exfat -n "MiSTer_Data" /dev/mmcblk0p1
+
+  # Mount the MiSTer_Data partition.
+  mkdir -p /mnt/data
+  mount.exfat-fuse /dev/mmcblk0p1 /mnt/data
+
+  # Copy the MiSTer release files to the MiSTer_Data partition.
+  cp -r /tmp/release/files/* /mnt/data/
+  umount /mnt/data
+else
+  echo "Unknown target filesystem type: $FUSION_FS_CONFIG"
+  kill -9 $FBV_PID
+  fbv -fr /tmp/release/failure_fs.png &
+  while true
+  do
+    echo "Unknown target filesystem type: $FUSION_FS_CONFIG"
+    sleep 3
+  done
+fi
 
 # Write the MiSTer bootloader.
 dd if="/tmp/release/files/linux/uboot.img" of="/dev/mmcblk0p2" bs=64k

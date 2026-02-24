@@ -19,7 +19,7 @@ ARG BUILDROOT_VERSION=2024.02.1
 ARG MAKE_JOBS=10
 
 RUN apt-get -y update && apt-get -y install build-essential git curl file wget cpio unzip rsync bc flex bison zip \
-  fdisk dosfstools
+  fdisk dosfstools parted
 RUN useradd -m -d /home/mr-fusion -s /bin/bash mr-fusion
 USER mr-fusion
 

@@ -15,34 +15,42 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
 # MA 02110-1301, USA.
 
-if [[ -z "${MISTER_RELEASE}" ]]; then
-  echo "Please set MISTER_RELEASE environment variable to a valid release, e.g. 'release_20231108.7z'"
-  echo "See https://github.com/MiSTer-devel/SD-Installer-Win64_MiSTer/tree/master for a list of available releases."
+if [[ -z "${SENHOR_RELEASE}" ]]; then
+  echo "Please set SENHOR_RELEASE environment variable to a valid release, e.g. 'release_Senhor_20231108.7z'"
+  echo "See https://github.com/CoreRasurae/SD-Installer-Win64_Senhor/tree/master for a list of available releases."
   exit 1
 fi
 
-echo "Building SD card image with ${MISTER_RELEASE}..."
+if [[ -z "${FUSION_FS_CONFIG}" ]]; then
+  echo "Please set FUSION_FS_CONFIG environment variable to a valid root filesystem type, e.g. 'exfat' or 'ext4'"
+  exit 1
+fi
+
+echo "Building SD card image with ${SENHOR_RELEASE}..."
 
 # Create the SD card image container
-dd if=/dev/zero of=/files/images/mr-fusion.img bs=12M count=10
+dd if=/dev/zero of=/files/images/mr-fusion.img bs=16M count=10
 
 # Partition the SD card image
 sfdisk --force /files/images/mr-fusion.img << EOF
 start=10240, type=0b
 start=2048, size=8192, type=a2
 EOF
+sfdisk /files/images/mr-fusion.img -A 2 
 
 # Attach the SD card image to a loopback device
-losetup -fP /files/images/mr-fusion.img
+LOOP_DEV=$( losetup -f )
+echo "Using loop device: $LOOP_DEV"
+losetup -P $LOOP_DEV /files/images/mr-fusion.img
 
 # Install the bootloader
-dd if="/files/vendor/bootloader.img" of="/dev/loop0p2" bs=64k
+dd if="/files/vendor/bootloader.img" of="${LOOP_DEV}p2" bs=64k
 sync
 
 # Create the data partition
-mkfs.vfat -n "MRFUSION" /dev/loop0p1
+mkfs.vfat -n "MRFUSION" ${LOOP_DEV}p1
 mkdir -p /mnt/data
-mount /dev/loop0p1 /mnt/data
+mount ${LOOP_DEV}p1 /mnt/data
 
 # Copy support files
 cp -r /files/vendor/support/* /mnt/data/
@@ -50,9 +58,12 @@ cp -r /files/vendor/support/* /mnt/data/
 # Copy kernel and initramfs
 cp /home/mr-fusion/linux-socfpga/arch/arm/boot/zImage /mnt/data
 
+# Set the configuration for the FS... for now only a single config
+echo "FUSION_FS_CONFIG=${FUSION_FS_CONFIG}" > /mnt/data/build_configs.sh
+
 # Download and copy MiSTer release.
 curl -LsS -o /mnt/data/release.7z \
-  https://github.com/MiSTer-devel/SD-Installer-Win64_MiSTer/raw/master/${MISTER_RELEASE}
+  https://github.com/CoreRasurae/SD-Installer-Win64_Senhor/raw/master/${SENHOR_RELEASE}
 
 # Support MiSTer Scripts
 mkdir -p /mnt/data/Scripts
@@ -71,8 +82,8 @@ mkdir -p /mnt/data/config
 # Clean up
 sync
 umount /mnt/data
-losetup -d /dev/loop0
+losetup -d ${LOOP_DEV}
 
 # Rename and compress the SD card image
 cd /files/images
-zip -m mr-fusion-$(date +"%Y-%m-%d").img.zip mr-fusion.img
+zip -m mr-fusion-${FUSION_FS_CONFIG}_$(date +"%Y-%m-%d").img.zip mr-fusion.img
